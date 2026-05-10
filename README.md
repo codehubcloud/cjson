@@ -679,4 +679,6 @@ build/
 
 ## 17. License
 
-当前未指定开源协议。若用于开源项目，建议补充 `LICENSE` 文件。
+本项目使用 **BSD 3-Clause "New" or "Revised" License**。
+
+建议在工程根目录新增 `LICENSE` 文件，并写入 BSD 3-Clause License 正文。
