@@ -13,256 +13,188 @@
 extern "C" {
 #endif
 
-#include <stddef.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
-#define CJSON_FIELD_INVALID_OFFSET ((size_t)(~(size_t)0U))
-
+/* JSON 布尔类型枚举, 用于表示 JSON 中的 true/false 值 */
 typedef enum {
     BOOL_FALSE = 0,
     BOOL_TRUE,
 } CJSONBool_E;
 
+/* JSON 响应结果类型枚举, 对应 JSON 中的 "result" 字段值 */
 typedef enum {
     RESULT_FAIL = 0,
     RESULT_PASS,
 } CJSONResult_E;
 
+/* JSON 数据类型枚举, 用于标识键值对中数据的类型 */
 typedef enum {
-    DATA_EMPTY = 0,
-    DATA_STRING,
-    DATA_OBJECT,
-    DATA_INT,
+    DATA_INT = 0,
     DATA_UINT,
     DATA_BOOL,
     DATA_DOUBLE,
+    DATA_STRING,
     DATA_CHAR,
 } CJSONDataType_E;
 
-typedef enum {
-    FIELD_INT = 0,
-    FIELD_UINT,
-    FIELD_BOOL,
-    FIELD_STRING,
-    FIELD_DOUBLE,
-    FIELD_CHAR,
-} CJSONFieldType_E;
-
+/* JSON 键值对结构体, 包含 key、类型和对应类型的 union 值 */
 typedef struct {
-    const char* jsonKey;
-    CJSONFieldType_E fieldType;
-    size_t fieldOffset;
-    size_t fieldSize;
-} CJSONField_S;
+    const char *key;      /* JSON 对象中的键名 */
+    CJSONDataType_E type; /* 值的数据类型 */
 
+    union {
+        int64_t intValue;        /* 有符号整数值 */
+        uint64_t uintValue;      /* 无符号整数值 */
+        const char *stringValue; /* 字符串值 */
+        CJSONBool_E boolValue;   /* 布尔值 */
+        char charValue;          /* 单字符值 */
+    };
+} CJSONKv_S;
+
+/* 多item的json */
 typedef struct {
-    CJSONResult_E result;
-    CJSONDataType_E dataType;
-    char* dataString;
-    void* dataObject;
-    int64_t intValue;
-    uint64_t uintValue;
-    long double doubleValue;
-    CJSONBool_E boolValue;
-    char charValue;
-} CJSONResponse_S;
+    CJSONKv_S *kvs;
+    size_t kvCount;
+} CJSONItem_S;
 
-typedef struct {
-    char* dataBuf;
-    size_t dataLen;
-    CJSONDataType_E dataType;
-    CJSONResult_E result;
-    const void* data;
-    const CJSONField_S* fields;
-    int64_t intValue;
-    uint64_t uintValue;
-    long double doubleValue;
-    CJSONBool_E boolValue;
-    char charValue;
-} CJSONBuildParam_S;
+/******************************************************************************
+ * @brief      : 构建 JSON 响应并写入缓冲区
+ * @param[in]  : dataBuf --输出缓冲区, dataLen --输出缓冲区大小, result --响应结果 (RESULT_PASS / RESULT_FAIL), kvs --键值对数组指针(无数据时传 NULL),
+ *               kvCount--键值对个数(无数据时传 0)
+ * @param[out] : 无
+ * @return     : 无
+ * @note       : 构建失败时会把 dataBuf[0] 置为 '\0'
+ ******************************************************************************/
+void CJSON_ResultBuildKv(char *dataBuf, size_t dataLen, CJSONResult_E result, const CJSONKv_S *kvs, size_t kvCount);
 
-typedef struct {
-    const char* jsonString;
-    CJSONDataType_E dataType;
-    CJSONResponse_S* response;
-    void* data;
-    const CJSONField_S* fields;
-} CJSONParseParam_S;
+/******************************************************************************
+ * @brief      : 构建多行 JSON 响应（detail数组结构扩展版）
+ * @param[in]  : dataBuf --输出缓冲区, dataLen --缓冲区大小, result --调用方传入的命令执行结果, items --item数组, itemCount --item数量
+ * @param[out] : dataBuf --完整 JSON 输出结果
+ * @return     : 无
+ * @note       : detail 内每个 item 独立包含 result + data，summary 自动统计 fail
+ ******************************************************************************/
+void FT_ResultPrintMultiLineImpl(char *dataBuf, size_t dataLen, CJSONResult_E result, const CJSONItem_S *items, size_t itemCount);
 
-typedef struct {
-    const char* typeName;
-    const CJSONField_S* fields;
-} CJSONObjectType_S;
+/******************************************************************************
+ * @brief      : 创建有符号整数类型的键值对
+ * @param[in]  : key --JSON 中的键名, value --有符号整数值
+ * @param[out] : 无
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 支持 int / long / long long / int32_t / int64_t 等类型
+ ******************************************************************************/
+static inline CJSONKv_S CJSON_MakeIntKv(const char *key, int64_t value)
+{
+    CJSONKv_S kv = {key, DATA_INT, {.intValue = value}};
+    return kv;
+}
 
-#define CJSON_OFFSET_OF(type, member) ((size_t)&(((type*)0)->member))
+/******************************************************************************
+ * @brief      : 创建无符号整数类型的键值对
+ * @param[in]  : key --JSON 中的键名, value --无符号整数值
+ * @param[out] : 无
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 支持 unsigned int / unsigned long / uint32_t / uint64_t 等类型
+ ******************************************************************************/
+static inline CJSONKv_S CJSON_MakeUIntKv(const char *key, uint64_t value)
+{
+    CJSONKv_S kv = {key, DATA_UINT, {.uintValue = value}};
+    return kv;
+}
 
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
-#define CJSON_FIELD_TYPE_OF(value)      \
-    _Generic((value),                   \
-        _Bool: FIELD_BOOL,              \
-        char: FIELD_CHAR,               \
-        signed char: FIELD_INT,         \
-        unsigned char: FIELD_UINT,      \
-        short: FIELD_INT,               \
-        unsigned short: FIELD_UINT,     \
-        int: FIELD_INT,                 \
-        unsigned int: FIELD_UINT,       \
-        long: FIELD_INT,                \
-        unsigned long: FIELD_UINT,      \
-        long long: FIELD_INT,           \
-        unsigned long long: FIELD_UINT, \
-        float: FIELD_DOUBLE,            \
-        double: FIELD_DOUBLE,           \
-        long double: FIELD_DOUBLE,      \
-        char*: FIELD_STRING,            \
-        const char*: FIELD_STRING)
-#else
-#error "FT_Result requires C11 _Generic support. Please enable C11."
-#endif
+/******************************************************************************
+ * @brief      : 创建布尔值类型的键值对
+ * @param[in]  : key --JSON 中的键名, value --布尔值 (true / false)
+ * @param[out] : 无
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 输出为 JSON 中的 true 或 false 字符串
+ ******************************************************************************/
+static inline CJSONKv_S CJSON_MakeBoolKv(const char *key, bool value)
+{
+    CJSONKv_S kv = {key, DATA_BOOL, {.boolValue = value ? BOOL_TRUE : BOOL_FALSE}};
+    return kv;
+}
 
-#define CJSON_FIELD_AUTO_DESC(type, member, key)     {(key), CJSON_FIELD_TYPE_OF(((type*)0)->member), CJSON_OFFSET_OF(type, member), sizeof(((type*)0)->member)}
-#define CJSON_FIELD_KEY(type, member)                CJSON_FIELD_AUTO_DESC(type, member, #member)
-#define CJSON_FIELD_END()                            {NULL, FIELD_STRING, CJSON_FIELD_INVALID_OFFSET, 0U}
-#define CJSON_OBJECT_AUTO_FIELD_DESC(type, member)   CJSON_FIELD_KEY(type, member),
+/******************************************************************************
+ * @brief      : 创建字符串类型的键值对
+ * @param[in]  : key --JSON 中的键名, value --字符串指针(可以为 NULL, 会输出为空字符串)
+ * @param[out] : 无
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 支持 char * 和 const char *, 不对字符串进行转义处理
+ ******************************************************************************/
+static inline CJSONKv_S CJSON_MakeStringKv(const char *key, const char *value)
+{
+    CJSONKv_S kv = {key, DATA_STRING, {.stringValue = value}};
+    return kv;
+}
 
-#define CJSON_PP_EXPAND(...)                         __VA_ARGS__
-#define CJSON_PP_FOREACH_1(macro, type, item1)       macro(type, item1)
-#define CJSON_PP_FOREACH_2(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_1(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_3(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_2(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_4(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_3(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_5(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_4(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_6(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_5(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_7(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_6(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_8(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_7(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_9(macro, type, item1, ...)  macro(type, item1) CJSON_PP_FOREACH_8(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_10(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_9(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_11(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_10(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_12(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_11(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_13(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_12(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_14(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_13(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_15(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_14(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_16(macro, type, item1, ...) macro(type, item1) CJSON_PP_FOREACH_15(macro, type, __VA_ARGS__)
-#define CJSON_PP_FOREACH_SELECT(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, name, ...) name
-#define CJSON_PP_FOREACH(macro, type, ...)                                                                                                         \
-    CJSON_PP_EXPAND(CJSON_PP_FOREACH_SELECT(__VA_ARGS__, CJSON_PP_FOREACH_16, CJSON_PP_FOREACH_15, CJSON_PP_FOREACH_14, CJSON_PP_FOREACH_13,       \
-                                            CJSON_PP_FOREACH_12, CJSON_PP_FOREACH_11, CJSON_PP_FOREACH_10, CJSON_PP_FOREACH_9, CJSON_PP_FOREACH_8, \
-                                            CJSON_PP_FOREACH_7, CJSON_PP_FOREACH_6, CJSON_PP_FOREACH_5, CJSON_PP_FOREACH_4, CJSON_PP_FOREACH_3,    \
-                                            CJSON_PP_FOREACH_2, CJSON_PP_FOREACH_1)(macro, type, __VA_ARGS__))
+/******************************************************************************
+ * @brief      : 创建单字符类型的键值对
+ * @param[in]  : key --JSON 中的键名, value --单字符值
+ * @param[out] : 无
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 输出为 JSON 字符串格式, 例如 'A' 输出为 "A"
+ ******************************************************************************/
+static inline CJSONKv_S CJSON_MakeCharKv(const char *key, char value)
+{
+    CJSONKv_S kv = {key, DATA_CHAR, {.charValue = value}};
+    return kv;
+}
 
-#define FT_RESULT_CAT_INNER(left, right)          left##right
-#define FT_RESULT_CAT(left, right)                FT_RESULT_CAT_INNER(left, right)
-#define FT_RESULT_OBJECT_FIELDS_FUNC_NAME(type)   FT_ResultFields_##type
-#define FT_RESULT_OBJECT_REGISTER_FUNC_NAME(type) FT_ResultRegister_##type
-#define FT_RESULT_OBJECT_PRINT_FUNC_NAME(type)    FT_ResultPrint_##type
-#define FT_RESULT_OBJECT_PARSE_FUNC_NAME(type)    FT_ResultParse_##type
+/******************************************************************************
+ * @brief      : 自动推导类型并创建键值对宏
+ * @param[in]  : key --JSON 中的键名 (字符串字面量), x --值表达式(类型会被自动推导)
+ * @return     : CJSONKv_S --构造的键值对对象
+ * @note       : 基于 _Generic 自动选择合适的创建函数
+ *              支持类型：int, unsigned int, long, unsigned long,
+ *              long long, unsigned long long, float, double,
+ *              long double, char *, const char *, bool, char
+ ******************************************************************************/
+#define CJSON_MAKE_KV(key, x)                 \
+    _Generic((x),                             \
+        int: CJSON_MakeIntKv,                 \
+        unsigned int: CJSON_MakeUIntKv,       \
+        long: CJSON_MakeIntKv,                \
+        unsigned long: CJSON_MakeUIntKv,      \
+        long long: CJSON_MakeIntKv,           \
+        unsigned long long: CJSON_MakeUIntKv, \
+        char *: CJSON_MakeStringKv,           \
+        const char *: CJSON_MakeStringKv,     \
+        bool: CJSON_MakeBoolKv,               \
+        char: CJSON_MakeCharKv)(key, x)
 
-#define FT_RESULT_DECLARE_OBJECT_TYPE(type)                                                                             \
-    CJSONBool_E FT_RESULT_OBJECT_REGISTER_FUNC_NAME(type)(void);                                                        \
-    void FT_RESULT_OBJECT_PRINT_FUNC_NAME(type)(char* outBuf, size_t outLen, CJSONResult_E result, const type* object); \
-    CJSONBool_E FT_RESULT_OBJECT_PARSE_FUNC_NAME(type)(const char* jsonString, CJSONResponse_S* response, type* object)
-
-#define FT_RESULT_DEFINE_OBJECT_TYPE(type, ...)                                                                                          \
-    static const CJSONField_S* FT_RESULT_OBJECT_FIELDS_FUNC_NAME(type)(void)                                                             \
-    {                                                                                                                                    \
-        static const CJSONField_S cjsonFields[] = {CJSON_PP_FOREACH(CJSON_OBJECT_AUTO_FIELD_DESC, type, __VA_ARGS__) CJSON_FIELD_END()}; \
-        return cjsonFields;                                                                                                              \
-    }                                                                                                                                    \
-    CJSONBool_E FT_RESULT_OBJECT_REGISTER_FUNC_NAME(type)(void)                                                                          \
-    {                                                                                                                                    \
-        return CJSON_RegisterObjectType(#type, FT_RESULT_OBJECT_FIELDS_FUNC_NAME(type)());                                               \
-    }                                                                                                                                    \
-    void FT_RESULT_OBJECT_PRINT_FUNC_NAME(type)(char* outBuf, size_t outLen, CJSONResult_E result, const type* object)                   \
-    {                                                                                                                                    \
-        const CJSONField_S* fields = CJSON_FindObjectFields(#type);                                                                      \
-        CJSONBuildParam_S cjsonBuildParam = {0};                                                                                         \
-        cjsonBuildParam.dataType = DATA_OBJECT;                                                                                          \
-        cjsonBuildParam.dataBuf = outBuf;                                                                                                \
-        cjsonBuildParam.dataLen = outLen;                                                                                                \
-        cjsonBuildParam.result = result;                                                                                                 \
-        cjsonBuildParam.data = (const void*)object;                                                                                      \
-        cjsonBuildParam.fields = (fields != NULL) ? fields : FT_RESULT_OBJECT_FIELDS_FUNC_NAME(type)();                                  \
-        CJSON_ResultBuild(&cjsonBuildParam);                                                                                             \
-    }                                                                                                                                    \
-    CJSONBool_E FT_RESULT_OBJECT_PARSE_FUNC_NAME(type)(const char* jsonString, CJSONResponse_S* response, type* object)                  \
-    {                                                                                                                                    \
-        const CJSONField_S* fields = CJSON_FindObjectFields(#type);                                                                      \
-        fields = (fields != NULL) ? fields : FT_RESULT_OBJECT_FIELDS_FUNC_NAME(type)();                                                  \
-        return CJSON_ResultParse(&(const CJSONParseParam_S){jsonString, DATA_OBJECT, response, (void*)object, fields});                  \
-    }
-
-#define FT_RESULT_SET_BUILD_DATA(buildParam, dataArg) \
-    _Generic((dataArg),                               \
-        _Bool: CJSON_BuildParamSetBool,               \
-        char: CJSON_BuildParamSetChar,                \
-        signed char: CJSON_BuildParamSetInt,          \
-        unsigned char: CJSON_BuildParamSetUInt,       \
-        short: CJSON_BuildParamSetInt,                \
-        unsigned short: CJSON_BuildParamSetUInt,      \
-        int: CJSON_BuildParamSetInt,                  \
-        unsigned int: CJSON_BuildParamSetUInt,        \
-        long: CJSON_BuildParamSetInt,                 \
-        unsigned long: CJSON_BuildParamSetUInt,       \
-        long long: CJSON_BuildParamSetInt,            \
-        unsigned long long: CJSON_BuildParamSetUInt,  \
-        float: CJSON_BuildParamSetDouble,             \
-        double: CJSON_BuildParamSetDouble,            \
-        long double: CJSON_BuildParamSetDouble,       \
-        char*: CJSON_BuildParamSetPointer,            \
-        const char*: CJSON_BuildParamSetPointer,      \
-        void*: CJSON_BuildParamSetPointer,            \
-        const void*: CJSON_BuildParamSetPointer,      \
-        default: CJSON_BuildParamSetPointer)((buildParam), (dataArg))
-
-#define FT_RESULT_BUILD_COMMON(dataTypeArg, outBufArg, outLenArg, resultArg, dataArg) \
-    do {                                                                              \
-        CJSONBuildParam_S cjsonBuildParam = {0};                                      \
-        cjsonBuildParam.dataType = (dataTypeArg);                                     \
-        cjsonBuildParam.dataBuf = (outBufArg);                                        \
-        cjsonBuildParam.dataLen = (outLenArg);                                        \
-        cjsonBuildParam.result = (resultArg);                                         \
-        cjsonBuildParam.fields = NULL;                                                \
-        FT_RESULT_SET_BUILD_DATA(&cjsonBuildParam, dataArg);                          \
-        CJSON_ResultBuild(&cjsonBuildParam);                                          \
+/******************************************************************************
+ * @brief      : 构建 JSON 响应宏
+ * @param[in]  : dataBuf --输出缓冲区指针, dataLen --输出缓冲区大小, result --响应结果 (RESULT_PASS / RESULT_FAIL), kvs --键值对数组(无数据时传 NULL),
+ *               kvCount --键值对个数(无数据时传 0)
+ * @return     : 无
+ * @note       : 宏展开为调用 CJSON_ResultBuildKv(), 采用 do-while(0) 模式
+ *              例子：CJSONKv_S kvs[] = {CJSON_MAKE_KV("vol", 220)};
+ *              FT_ResultPrint(buf, sizeof(buf), RESULT_PASS, kvs, sizeof(kvs) / sizeof(kvs[0]));
+ ******************************************************************************/
+#define FT_ResultPrint(dataBuf, dataLen, result, kvs, kvCount)       \
+    do {                                                             \
+        CJSON_ResultBuildKv(dataBuf, dataLen, result, kvs, kvCount); \
     } while (0)
 
-#define FT_RESULT_PARSE_COMMON(dataTypeArg, jsonArg, responseArg, dataArg) \
-    CJSON_ResultParse(&(const CJSONParseParam_S){(jsonArg), (dataTypeArg), (responseArg), (void*)(dataArg), NULL})
-
-#define FT_ResultPrint(typeArg, outBufArg, outLenArg, resultArg, dataArg) \
-    FT_RESULT_CAT(FT_ResultPrint_, typeArg)((outBufArg), (outLenArg), (resultArg), (dataArg))
-
-#define FT_ResultParse(typeArg, jsonArg, responseArg, dataArg)               FT_RESULT_CAT(FT_ResultParse_, typeArg)((jsonArg), (responseArg), (dataArg))
-
-#define FT_ResultPrint_DATA_EMPTY(outBufArg, outLenArg, resultArg, dataArg)  FT_RESULT_BUILD_COMMON(DATA_EMPTY, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_STRING(outBufArg, outLenArg, resultArg, dataArg) FT_RESULT_BUILD_COMMON(DATA_STRING, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_INT(outBufArg, outLenArg, resultArg, dataArg)    FT_RESULT_BUILD_COMMON(DATA_INT, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_UINT(outBufArg, outLenArg, resultArg, dataArg)   FT_RESULT_BUILD_COMMON(DATA_UINT, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_BOOL(outBufArg, outLenArg, resultArg, dataArg)   FT_RESULT_BUILD_COMMON(DATA_BOOL, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_DOUBLE(outBufArg, outLenArg, resultArg, dataArg) FT_RESULT_BUILD_COMMON(DATA_DOUBLE, outBufArg, outLenArg, resultArg, dataArg)
-#define FT_ResultPrint_DATA_CHAR(outBufArg, outLenArg, resultArg, dataArg)   FT_RESULT_BUILD_COMMON(DATA_CHAR, outBufArg, outLenArg, resultArg, dataArg)
-
-#define FT_ResultParse_DATA_EMPTY(jsonArg, responseArg, dataArg)             FT_RESULT_PARSE_COMMON(DATA_EMPTY, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_STRING(jsonArg, responseArg, dataArg)            FT_RESULT_PARSE_COMMON(DATA_STRING, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_INT(jsonArg, responseArg, dataArg)               FT_RESULT_PARSE_COMMON(DATA_INT, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_UINT(jsonArg, responseArg, dataArg)              FT_RESULT_PARSE_COMMON(DATA_UINT, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_BOOL(jsonArg, responseArg, dataArg)              FT_RESULT_PARSE_COMMON(DATA_BOOL, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_DOUBLE(jsonArg, responseArg, dataArg)            FT_RESULT_PARSE_COMMON(DATA_DOUBLE, jsonArg, responseArg, dataArg)
-#define FT_ResultParse_DATA_CHAR(jsonArg, responseArg, dataArg)              FT_RESULT_PARSE_COMMON(DATA_CHAR, jsonArg, responseArg, dataArg)
-
-void CJSON_BuildParamSetInt(CJSONBuildParam_S* buildParam, int64_t value);
-void CJSON_BuildParamSetUInt(CJSONBuildParam_S* buildParam, uint64_t value);
-void CJSON_BuildParamSetBool(CJSONBuildParam_S* buildParam, int value);
-void CJSON_BuildParamSetDouble(CJSONBuildParam_S* buildParam, long double value);
-void CJSON_BuildParamSetChar(CJSONBuildParam_S* buildParam, char value);
-void CJSON_BuildParamSetPointer(CJSONBuildParam_S* buildParam, const void* value);
-
-CJSONBool_E CJSON_RegisterObjectType(const char* typeName, const CJSONField_S* fields);
-const CJSONField_S* CJSON_FindObjectFields(const char* typeName);
-void CJSON_ResultBuild(const CJSONBuildParam_S* buildParam);
-CJSONBool_E CJSON_ResultParse(const CJSONParseParam_S* parseParam);
+/******************************************************************************
+ * @brief      : 构建支持 detail 嵌套 JSON 的多行响应
+ * @param[in]  : dataBuf --输出缓冲区, dataLen --缓冲区大小, result --整体结果, kvsArray --每条 detail 的 KV 数组, kvCounts --每条 KV 数量, itemCount
+ *               --detail数量
+ * @param[out] : 无
+ * @return     : 无
+ * @note       : detail 内部支持 {"result","data":{...}} 结构
+ ******************************************************************************/
+#define FT_ResultPrintMultiLine(dataBuf, dataLen, result, items, itemCount)      \
+    do {                                                                         \
+        FT_ResultPrintMultiLineImpl(dataBuf, dataLen, result, items, itemCount); \
+    } while (0)
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
+
